@@ -1,12 +1,162 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <link rel="icon" href="%sveltekit.assets%/favicon.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    %sveltekit.head%
-  </head>
-  <body data-sveltekit-preload-data="hover">
-    <div style="display: contents">%sveltekit.body%</div>
-  </body>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Location Tracker with Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol/dist/L.Control.Locate.min.css"/>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol/dist/L.Control.Locate.min.js"></script>
+
+
+    <style>
+        body { font-family: Arial, sans-serif; padding: 10px; }
+        #status { margin-bottom: 10px; }
+        #map {
+            width: 800px;
+            height: 500px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            margin: 0 auto;
+        }
+    </style>
+</head>
+<body>
+
+<h2>User Location Tracker with Map</h2>
+<div id="status">Waiting for permission...</div>
+<div id="map"></div>
+<button onclick="goToMe()" 
+        style="position:absolute; top:20px; right:20px; z-index:999; padding:8px 12px;">
+    📍 My Location
+</button>
+<div style="position:absolute; top:70px; right:20px; z-index:999;">
+    <input id="usernameInput" 
+           type="text" 
+           placeholder="Nhập tên của bạn..."
+           style="padding:6px; width:160px;">
+</div>
+
+
+
+<script>
+    const apiURL = "https://live-location-z40f.onrender.com/location";
+    let userLocation = null;
+    const markers = []; // Mảng chứa tất cả các marker
+
+
+    // Khởi tạo map
+    const map = L.map('map').setView([0, 0], 2);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+    let userMarker = null;
+    let firstFit = true;
+    let username = "private user";
+
+    document.getElementById("usernameInput").addEventListener("input", (e) => {
+        username = e.target.value.trim() === "" ? "private user" : e.target.value.trim();
+
+        // Nếu đã có marker thì cập nhật luôn popup
+        if (userMarker) {
+            userMarker.setPopupContent(username);
+        }
+    });
+
+    function goToMe() {
+        if (userLocation) {
+            map.setView(userLocation, 16);
+        } else {
+            alert("Chưa có vị trí người dùng!");
+        }
+    }
+
+    async function fetchAndUpdateMap() {
+        try {
+            const res = await fetch(apiURL);
+            if (!res.ok) throw new Error("Server returned error");
+
+            const data = await res.json();
+
+            // Xóa tất cả các marker cũ
+            markers.forEach(marker => map.removeLayer(marker));
+            markers.length = 0; // Xóa tất cả các marker trong mảng
+
+            // Hiển thị lại marker của tất cả người dùng
+            data.forEach((user, i) => {
+                const mk = L.marker([user.lat, user.lon]).addTo(map)
+                    .bindPopup(`User #${i + 1}<br>Username: ${user.username}<br>Lat: ${user.lat}<br>Lon: ${user.lon}`);
+                markers.push(mk);
+            });
+
+            // Fit bounds lần đầu tiên khi đã có marker
+            if (firstFit && markers.length > 0) {
+                const group = L.featureGroup(markers);
+                map.fitBounds(group.getBounds().pad(0.2)); // Điều chỉnh bản đồ để vừa với tất cả markers
+                firstFit = false;
+            }
+
+        } catch (err) {
+            console.warn("Cannot connect to server:", err);
+            document.getElementById("status").innerText = "Server offline — only your position is shown.";
+        }
+    }
+
+    async function updateLocation() {
+        const username = document.getElementById("usernameInput").value || "private user";
+        const lat = 10.8231;  // Sử dụng vĩ độ người dùng thật (có thể lấy từ GPS)
+        const lon = 106.6297; // Sử dụng kinh độ người dùng thật (có thể lấy từ GPS)
+
+        const response = await fetch(apiURL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ lat, lon, username })
+        });
+
+        const data = await response.json();
+        console.log("Position sent successfully:", data);
+
+        // Sau khi gửi vị trí, gọi lại hàm để cập nhật tất cả vị trí người dùng
+        fetchAndUpdateMap();
+    }
+
+    // Lấy danh sách người dùng khi trang được tải
+    fetchAndUpdateMap();
+
+    // Cập nhật lại danh sách vị trí người dùng mỗi 5 giây
+    setInterval(fetchAndUpdateMap, 5000); // Cập nhật mỗi 5 giây
+    function denied() {
+        document.getElementById("status").innerText = "Permission denied.";
+    }
+
+    let lastSent = 0;
+
+    function success(pos) {
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+
+        userLocation = [lat, lon];
+
+        if (!userMarker) {
+            // Tạo marker lần đầu
+            userMarker = L.marker(userLocation).addTo(map);
+            userMarker.bindPopup(username);
+            map.setView(userLocation, 16);
+        } else {
+            // Cập nhật vị trí marker
+            userMarker.setLatLng(userLocation);
+            // Cập nhật nội dung popup theo tên mới
+            userMarker.setPopupContent(username);
+        }
+
+        document.getElementById("status").innerText = "Location updating...";
+    }
+
+
+
+
+    navigator.geolocation.watchPosition(success, denied, { enableHighAccuracy: true });
+</script>
+
+</body>
 </html>
